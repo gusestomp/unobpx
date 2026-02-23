@@ -7,7 +7,7 @@
 // It handles three protocol layers:
 //   - OB responses: base64 + XOR encoded server responses from the PX collector
 //   - Sensor payloads: XOR + base64 + shuffle-interleaved sensor POST data
-//   - OBS payloads: AES-256-GCM encrypted Observer/SNR telemetry
+//   - Snare payloads: AES-256-GCM encrypted telemetry from snr.js (iovation/TransUnion, not PX)
 //
 // This package is decode/decrypt only — for traffic analysis and research.
 package unobpx

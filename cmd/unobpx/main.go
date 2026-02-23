@@ -188,7 +188,7 @@ Usage:
 Commands:
   ob       Decode an OB collector response
   sensor   Decode a sensor payload from network traffic
-  obs      Decrypt an OBS (Observer/SNR) encrypted payload
+  obs      Decrypt a Snare (snr.js) encrypted payload
   xorkey   Compute the OB XOR key from a PX tag string
 
 Examples:
@@ -201,7 +201,7 @@ Examples:
   # Decode sensor payload (needs uuid and sts from POST params)
   unobpx sensor "<encoded>" "12345678-1234-..." "1771836032025"
 
-  # Decrypt OBS payload
+  # Decrypt Snare (snr.js) payload
   unobpx obs "KAUHEVKF<base64_data>"
 
   # Compute XOR key from any PX tag

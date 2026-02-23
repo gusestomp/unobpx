@@ -2,7 +2,7 @@
 
 See through PerimeterX. Every layer, decoded.
 
-[PerimeterX](https://www.humansecurity.com/) (now HUMAN Security) wraps its client-server protocol in three layers of obfuscation — XOR, shuffle-interleave, and AES-256-GCM. This tool strips all of them.
+[PerimeterX](https://www.humansecurity.com/) (now HUMAN Security) wraps its client-server protocol in two layers of obfuscation — XOR and shuffle-interleave. Some PX-protected sites also bundle [Snare](https://www.transmitsecurity.com/) (by iovation/TransUnion), a separate fraud detection product served through PX's first-party `/si/` path. This tool strips all of them.
 
 Open your browser devtools, capture PX traffic, and feed it to `unobpx`. Out comes the raw protocol: session commands, fingerprint JSON, encrypted telemetry — all in plaintext.
 
@@ -12,7 +12,7 @@ Open your browser devtools, capture PX traffic, and feed it to `unobpx`. Out com
 |-------|-------------|---------------|
 | **OB responses** | Base64 blob in the `ob` JSON field | Session IDs, cookies, PoW challenges, config, timestamps |
 | **Sensor payloads** | Garbled `payload` POST parameter | Full browser fingerprint JSON (every field PX collects) |
-| **OBS telemetry** | `KAUHEVKF...` encrypted blob | WebGL, fonts, screen, timing, behavioral data |
+| **Snare telemetry** | `KAUHEVKF...` encrypted blob | WebGL, fonts, screen, timing, behavioral data (via `snr.js`, not PX) |
 
 ## Install
 
@@ -40,7 +40,7 @@ unobpx ob "<base64_ob_string>" --tag "IUMUAGcoCHQlTA=="
 # Decode a sensor payload (uuid and sts from the same POST request)
 unobpx sensor "<encoded_payload>" "<uuid>" "<sts>"
 
-# Decrypt OBS encrypted telemetry
+# Decrypt Snare (snr.js) encrypted telemetry
 unobpx obs "KAUHEVKF<base64_data>"
 ```
 
@@ -70,9 +70,9 @@ unobpx sensor "<encoded_payload>" "<uuid>" "<sts>"
 
 All three values are visible as separate POST parameters in the same request. Output is the raw fingerprint JSON.
 
-### `unobpx obs` — Decrypt Observer Telemetry
+### `unobpx obs` — Decrypt Snare Telemetry
 
-OBS payloads are AES-256-GCM encrypted with a key embedded in PX's `snr.js`. This decrypts them.
+Some PX-protected sites bundle Snare (`snr.js`), a separate fraud detection product by iovation/TransUnion. Snare payloads are AES-256-GCM encrypted with a key embedded in `snr.js`. This decrypts them.
 
 ```bash
 unobpx obs "KAUHEVKF<base64_data>"
@@ -120,7 +120,7 @@ cookies := unobpx.ExtractCookies(decoded)
 // Decode a sensor payload
 json, _ := unobpx.DecodeSensor(encoded, uuid, sts)
 
-// Decrypt OBS telemetry
+// Decrypt Snare (snr.js) telemetry
 plain, _ := unobpx.DecryptOBS(wireData)
 ```
 
@@ -164,10 +164,12 @@ Decoded text uses `~~~~` as command separator and `|` as field separator. Each c
 
 The UUID and STS are sent as separate POST parameters alongside the payload.
 
-### OBS Encryption
+### Snare Encryption
+
+Snare (`snr.js`) is a separate fraud detection product by iovation/TransUnion, not part of PX's core bot detection. Some PX-protected sites bundle it through PX's first-party `/si/` path. The encrypted payloads are sent to `/si/<token>/obs`.
 
 - **Algorithm**: AES-256-GCM
-- **Key**: `abC3UuT0Yte5FBGN2F6cQu0pegMgCMpr` (32 bytes, from `snr.js`)
+- **Key**: `abC3UuT0Yte5FBGN2F6cQu0pegMgCMpr` (32 bytes, hardcoded in `snr.js`)
 - **Wire format**: `"KAUHEVKF"` + `base64(nonce[12] + ciphertext + GCM_tag[16])`
 
 ## Full PX Research & Services

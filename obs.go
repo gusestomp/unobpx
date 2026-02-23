@@ -8,22 +8,24 @@ import (
 	"strings"
 )
 
-// OBS (Observer/SNR) payloads are encrypted with AES-256-GCM.
+// Snare (snr.js) is a fraud detection product by iovation/TransUnion,
+// separate from PX's core bot detection. Some PX-protected sites bundle it
+// through PX's first-party /si/ path, sending encrypted payloads to /si/<token>/obs.
 // Wire format: "KAUHEVKF" + base64(nonce[12] + ciphertext + tag[16])
 
 var (
-	// obsAESKey is the hard-coded AES-256-GCM key used by PX's snr.js
-	// for encrypting Observer telemetry payloads. This key is embedded
-	// in the snr.js script and is the same across all PX-protected sites.
+	// obsAESKey is the hard-coded AES-256-GCM key from snr.js (Snare by
+	// iovation/TransUnion). This key is the same across all sites that
+	// bundle Snare.
 	obsAESKey = []byte("abC3UuT0Yte5FBGN2F6cQu0pegMgCMpr")
 
-	// obsPrefix is the wire format identifier prepended to all OBS payloads.
+	// obsPrefix is the wire format identifier prepended to all Snare payloads.
 	obsPrefix = "KAUHEVKF"
 )
 
-// DecryptOBS decrypts a PX Observer (SNR) payload.
+// DecryptOBS decrypts a Snare (snr.js) encrypted payload.
 //
-// OBS payloads carry browser telemetry (fingerprints, timing, behavior data)
+// Snare payloads carry browser telemetry (fingerprints, timing, behavior data)
 // and are sent to the /si/<token>/obs endpoint. The wire format is:
 //
 //	"KAUHEVKF" + base64(nonce[12] + ciphertext + GCM_tag[16])
@@ -58,7 +60,7 @@ func DecryptOBS(wireData string) (string, error) {
 	return string(plain), nil
 }
 
-// OBSAESKey returns the hard-coded AES-256-GCM key used for OBS encryption.
+// OBSAESKey returns the hard-coded AES-256-GCM key from Snare (snr.js).
 // This is provided for reference and external tooling.
 func OBSAESKey() []byte {
 	k := make([]byte, len(obsAESKey))
