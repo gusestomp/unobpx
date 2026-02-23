@@ -1,0 +1,6 @@
+/unobpx
+*.exe
+*.test
+*.out
+.idea/
+.vscode/
