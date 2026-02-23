@@ -1,3 +1,3 @@
-module github.com/user/unobpx
+module github.com/sardanioss/unobpx
 
 go 1.22.0

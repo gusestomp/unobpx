@@ -16,7 +16,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/user/unobpx"
+	"github.com/sardanioss/unobpx"
 )
 
 func main() {

@@ -17,13 +17,13 @@ Open your browser devtools, capture PX traffic, and feed it to `unobpx`. Out com
 ## Install
 
 ```bash
-go install github.com/user/unobpx/cmd/unobpx@latest
+go install github.com/sardanioss/unobpx/cmd/unobpx@latest
 ```
 
 Or as a library:
 
 ```bash
-go get github.com/user/unobpx
+go get github.com/sardanioss/unobpx
 ```
 
 ## Quick Start
@@ -98,7 +98,7 @@ unobpx xorkey "Zj4TeyhNFxB5"
 ## Library Usage
 
 ```go
-import "github.com/user/unobpx"
+import "github.com/sardanioss/unobpx"
 
 // Compute XOR key from a PX tag
 xorKey := unobpx.ComputeOBXORKey("IUMUAGcoCHQlTA==")
