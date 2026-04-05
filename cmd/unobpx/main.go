@@ -7,6 +7,7 @@
 //	unobpx sensor <encoded_payload> <uuid> <sts>
 //	unobpx obs <wire_data>
 //	unobpx xorkey <tag_string>
+//	unobpx vm <init.js_file>
 package main
 
 import (
@@ -34,6 +35,8 @@ func main() {
 		handleOBS(os.Args[2:])
 	case "xorkey":
 		handleXORKey(os.Args[2:])
+	case "vm":
+		handleVM(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -164,6 +167,80 @@ func handleXORKey(args []string) {
 	fmt.Printf("XOR Key: %d (0x%02x)\n", key, key)
 }
 
+func handleVM(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: unobpx vm <init.js_file>")
+		os.Exit(1)
+	}
+
+	source, err := os.ReadFile(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
+		os.Exit(1)
+	}
+
+	prog, err := unobpx.ParseInitJS(string(source))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Parse error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stderr, "Parsed: f[%d], %d cases, root spec %d items, %d switch blocks\n",
+		len(prog.F), len(prog.Cases), len(prog.Root), len(prog.Switches))
+	for _, sw := range prog.Switches {
+		fmt.Fprintf(os.Stderr, "  L%d: switch(k(%s)) halt=%d cases=%d\n",
+			sw.Line, sw.ArrayVar, sw.HaltVal, len(sw.Cases))
+	}
+
+	// Expand initial n and show starting state
+	n := unobpx.VMExpand(prog.F, prog.Root)
+	fmt.Fprintf(os.Stderr, "Initial n[%d], opcode (sum) = %d\n\n", len(n), unobpx.VMSum(n))
+
+	trace, err := unobpx.VMTrace(prog)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Trace error (after %d steps): %v\n", len(trace), err)
+	}
+
+	// Build switch summary
+	type switchSummary struct {
+		Line     int    `json:"line"`
+		ArrayVar string `json:"array_var"`
+		HaltVal  int    `json:"halt_val"`
+		Cases    int    `json:"cases"`
+	}
+	var swSummary []switchSummary
+	for _, sw := range prog.Switches {
+		swSummary = append(swSummary, switchSummary{
+			Line:     sw.Line,
+			ArrayVar: sw.ArrayVar,
+			HaltVal:  sw.HaltVal,
+			Cases:    len(sw.Cases),
+		})
+	}
+
+	// Output trace as JSON
+	output := struct {
+		FLen       int                  `json:"f_len"`
+		CaseCount  int                  `json:"case_count"`
+		Switches   []switchSummary      `json:"switches"`
+		InitialN   []int                `json:"initial_n"`
+		InitOpcode int                  `json:"init_opcode"`
+		Steps      int                  `json:"steps"`
+		Trace      []unobpx.TraceEntry  `json:"trace"`
+	}{
+		FLen:       len(prog.F),
+		CaseCount:  len(prog.Cases),
+		Switches:   swSummary,
+		InitialN:   n,
+		InitOpcode: unobpx.VMSum(n),
+		Steps:      len(trace),
+		Trace:      trace,
+	}
+
+	pretty, _ := json.MarshalIndent(output, "", "  ")
+	fmt.Println(string(pretty))
+}
+
 func formatFields(fields []string) string {
 	if len(fields) == 0 {
 		return "(empty)"
@@ -190,6 +267,7 @@ Commands:
   sensor   Decode a sensor payload from network traffic
   obs      Decrypt a Snare (snr.js) encrypted payload
   xorkey   Compute the OB XOR key from a PX tag string
+  vm       Trace PX VM execution from an init.js file
 
 Examples:
   # Decode OB response with known XOR key
@@ -205,5 +283,8 @@ Examples:
   unobpx obs "KAUHEVKF<base64_data>"
 
   # Compute XOR key from any PX tag
-  unobpx xorkey "IUMUAGcoCHQlTA=="`)
+  unobpx xorkey "IUMUAGcoCHQlTA=="
+
+  # Trace PX VM execution from init.js
+  unobpx vm docs/px/walmart_4-3-26_init.js`)
 }
