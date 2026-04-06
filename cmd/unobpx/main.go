@@ -410,7 +410,9 @@ func handleDevirt(args []string) {
 	fmt.Fprintf(os.Stderr, "\nDevirtualizing L%d: switch(k(%s)) halt=%d, %d cases\n",
 		targetSw.Line, targetSw.ArrayVar, targetSw.HaltVal, len(targetSw.Cases))
 
-	initState := innerState
+	// Copy innerState before Devirtualize mutates it
+	initState := make([]int, len(innerState))
+	copy(initState, innerState)
 	outerN := finalN
 	fmt.Fprintf(os.Stderr, "Initial inner state[%d], opcode=%d\n\n",
 		len(initState), unobpx.VMSum(initState))
@@ -473,6 +475,7 @@ func handleDevirt(args []string) {
 				if subErr != nil {
 					fmt.Fprintf(os.Stderr, "  Error: %v\n", subErr)
 				}
+				subLines = unobpx.ResolveConstantsInline(subLines, initState, outerN, prog.F)
 				subLines = unobpx.ResolveStringTableInline(subLines, stringTable, outerTable, initState, outerN, prog.F)
 				for _, line := range subLines {
 					fmt.Println(line)
@@ -491,7 +494,8 @@ func handleDevirt(args []string) {
 		fmt.Fprintf(os.Stderr, "Devirtualization error (after %d lines): %v\n", len(jsLines), err)
 	}
 
-	// Inline string table lookups
+	// Resolve l.R.a[N], n[N], f[N] constants, then inline string table lookups
+	jsLines = unobpx.ResolveConstantsInline(jsLines, initState, outerN, prog.F)
 	jsLines = unobpx.ResolveStringTableInline(jsLines, stringTable, outerTable, initState, outerN, prog.F)
 
 	fmt.Println("// === Main interpreter ===")
@@ -512,6 +516,7 @@ func handleDevirt(args []string) {
 			if subErr != nil {
 				fmt.Fprintf(os.Stderr, "  %s error (after %d lines): %v\n", sub.Name, len(subLines), subErr)
 			}
+			subLines = unobpx.ResolveConstantsInline(subLines, initState, outerN, prog.F)
 			subLines = unobpx.ResolveStringTableInline(subLines, stringTable, outerTable, initState, outerN, prog.F)
 			for _, line := range subLines {
 				fmt.Println(line)
@@ -673,39 +678,39 @@ func printUsage() {
 	fmt.Println(`unobpx - PerimeterX (HUMAN Security) Protocol Decoder
 
 Usage:
-  unobpx <command> [arguments]
+	unobpx <command> [arguments]
 
 Commands:
-  ob       Decode an OB collector response
-  sensor   Decode a sensor payload from network traffic
-  obs      Decrypt a Snare (snr.js) encrypted payload
-  xorkey   Compute the OB XOR key from a PX tag string
-  vm       Trace PX VM execution from an init.js file
-  devirt   Devirtualize PX VM to equivalent JS source code
-  fieldmap Extract sensor field key arrays from init.js
+	ob       Decode an OB collector response
+	sensor   Decode a sensor payload from network traffic
+	obs      Decrypt a Snare (snr.js) encrypted payload
+	xorkey   Compute the OB XOR key from a PX tag string
+	vm       Trace PX VM execution from an init.js file
+	devirt   Devirtualize PX VM to equivalent JS source code
+	fieldmap Extract sensor field key arrays from init.js
 
 Examples:
-  # Decode OB response with known XOR key
-  unobpx ob "SGVsbG8gV29ybGQ=" 66
+# Decode OB response with known XOR key
+unobpx ob "SGVsbG8gV29ybGQ=" 66
 
-  # Decode OB response using tag string to derive key
-  unobpx ob "SGVsbG8gV29ybGQ=" --tag "IUMUAGcoCHQlTA=="
+# Decode OB response using tag string to derive key
+unobpx ob "SGVsbG8gV29ybGQ=" --tag "IUMUAGcoCHQlTA=="
 
-  # Decode sensor payload (needs uuid and sts from POST params)
-  unobpx sensor "<encoded>" "12345678-1234-..." "1771836032025"
+# Decode sensor payload (needs uuid and sts from POST params)
+unobpx sensor "<encoded>" "12345678-1234-..." "1771836032025"
 
-  # Decrypt Snare (snr.js) payload
-  unobpx obs "KAUHEVKF<base64_data>"
+# Decrypt Snare (snr.js) payload
+unobpx obs "KAUHEVKF<base64_data>"
 
-  # Compute XOR key from any PX tag
-  unobpx xorkey "IUMUAGcoCHQlTA=="
+# Compute XOR key from any PX tag
+unobpx xorkey "IUMUAGcoCHQlTA=="
 
-  # Trace PX VM execution from init.js
-  unobpx vm docs/px/walmart_4-3-26_init.js
+# Trace PX VM execution from init.js
+unobpx vm docs/px/walmart_4-3-26_init.js
 
-  # Extract field key arrays from init.js
-  unobpx fieldmap docs/px/walmart_4-3-26_init.js
+# Extract field key arrays from init.js
+unobpx fieldmap docs/px/walmart_4-3-26_init.js
 
-  # Diff field keys between two init.js versions
-  unobpx fieldmap docs/px/walmart_4-3-26_init.js --diff docs/px/walmart_4-4-26_init.js`)
+# Diff field keys between two init.js versions
+unobpx fieldmap docs/px/walmart_4-3-26_init.js --diff docs/px/walmart_4-4-26_init.js`)
 }
