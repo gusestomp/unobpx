@@ -40,6 +40,8 @@ func main() {
 		handleVM(os.Args[2:])
 	case "devirt":
 		handleDevirt(os.Args[2:])
+	case "fieldmap":
+		handleFieldMap(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -519,6 +521,139 @@ func handleDevirt(args []string) {
 	}
 }
 
+func handleFieldMap(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: unobpx fieldmap <init.js_file> [--diff <other_init.js>]")
+		os.Exit(1)
+	}
+
+	source, err := os.ReadFile(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
+		os.Exit(1)
+	}
+
+	arrays := unobpx.ExtractFieldKeyArrays(string(source))
+	directKeys := unobpx.ExtractDirectFieldKeys(string(source))
+
+	// Summary to stderr
+	totalKeys := 0
+	for _, arr := range arrays {
+		b64 := 0
+		for _, item := range arr.Items {
+			if unobpx.IsBase64SensorKey(item) {
+				b64++
+			}
+		}
+		totalKeys += b64
+		fmt.Fprintf(os.Stderr, "  %s -> %s (offset %d): %d items, %d base64 keys\n",
+			arr.LookupFn, arr.ArrayFn, arr.Offset, len(arr.Items), b64)
+	}
+	fmt.Fprintf(os.Stderr, "Total: %d arrays, %d base64 keys in arrays, %d direct keys\n",
+		len(arrays), totalKeys, len(directKeys))
+
+	// Check for --diff mode
+	diffFile := ""
+	for i, a := range args[1:] {
+		if a == "--diff" && i+2 < len(args) {
+			diffFile = args[i+2]
+		}
+	}
+
+	if diffFile != "" {
+		source2, err := os.ReadFile(diffFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading diff file: %v\n", err)
+			os.Exit(1)
+		}
+
+		arrays2 := unobpx.ExtractFieldKeyArrays(string(source2))
+
+		// Build key→(arrayFn, idx) maps
+		map1 := make(map[string][2]interface{})
+		for _, arr := range arrays {
+			for i, item := range arr.Items {
+				if unobpx.IsBase64SensorKey(item) {
+					map1[item] = [2]interface{}{arr.ArrayFn, i}
+				}
+			}
+		}
+		map2 := make(map[string][2]interface{})
+		for _, arr := range arrays2 {
+			for i, item := range arr.Items {
+				if unobpx.IsBase64SensorKey(item) {
+					map2[item] = [2]interface{}{arr.ArrayFn, i}
+				}
+			}
+		}
+
+		// Count overlap
+		shared := 0
+		for k := range map1 {
+			if _, ok := map2[k]; ok {
+				shared++
+			}
+		}
+		fmt.Fprintf(os.Stderr, "\nDiff: %d keys in file1, %d in file2, %d shared (same build = %v)\n",
+			len(map1), len(map2), shared, shared == len(map1) && shared == len(map2))
+
+		// JSON diff output
+		type DiffOutput struct {
+			File1Keys  int `json:"file1_keys"`
+			File2Keys  int `json:"file2_keys"`
+			SharedKeys int `json:"shared_keys"`
+			SameBuild  bool `json:"same_build"`
+		}
+		diffOut := DiffOutput{
+			File1Keys:  len(map1),
+			File2Keys:  len(map2),
+			SharedKeys: shared,
+			SameBuild:  shared == len(map1) && shared == len(map2),
+		}
+		pretty, _ := json.MarshalIndent(diffOut, "", "  ")
+		fmt.Println(string(pretty))
+		return
+	}
+
+	// Normal mode: JSON output of all arrays with their keys
+	type ArrayOutput struct {
+		ArrayFn    string   `json:"array_fn"`
+		LookupFn   string   `json:"lookup_fn,omitempty"`
+		Offset     int      `json:"offset"`
+		TotalItems int      `json:"total_items"`
+		Base64Keys []string `json:"base64_keys"`
+	}
+
+	var output []ArrayOutput
+	for _, arr := range arrays {
+		var b64Keys []string
+		for _, item := range arr.Items {
+			if unobpx.IsBase64SensorKey(item) {
+				b64Keys = append(b64Keys, item)
+			}
+		}
+		output = append(output, ArrayOutput{
+			ArrayFn:    arr.ArrayFn,
+			LookupFn:   arr.LookupFn,
+			Offset:     arr.Offset,
+			TotalItems: len(arr.Items),
+			Base64Keys: b64Keys,
+		})
+	}
+
+	// Add direct keys
+	if len(directKeys) > 0 {
+		output = append(output, ArrayOutput{
+			ArrayFn:    "_direct",
+			TotalItems: len(directKeys),
+			Base64Keys: directKeys,
+		})
+	}
+
+	pretty, _ := json.MarshalIndent(output, "", "  ")
+	fmt.Println(string(pretty))
+}
+
 func formatFields(fields []string) string {
 	if len(fields) == 0 {
 		return "(empty)"
@@ -547,6 +682,7 @@ Commands:
   xorkey   Compute the OB XOR key from a PX tag string
   vm       Trace PX VM execution from an init.js file
   devirt   Devirtualize PX VM to equivalent JS source code
+  fieldmap Extract sensor field key arrays from init.js
 
 Examples:
   # Decode OB response with known XOR key
@@ -565,5 +701,11 @@ Examples:
   unobpx xorkey "IUMUAGcoCHQlTA=="
 
   # Trace PX VM execution from init.js
-  unobpx vm docs/px/walmart_4-3-26_init.js`)
+  unobpx vm docs/px/walmart_4-3-26_init.js
+
+  # Extract field key arrays from init.js
+  unobpx fieldmap docs/px/walmart_4-3-26_init.js
+
+  # Diff field keys between two init.js versions
+  unobpx fieldmap docs/px/walmart_4-3-26_init.js --diff docs/px/walmart_4-4-26_init.js`)
 }
