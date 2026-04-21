@@ -5,12 +5,10 @@ import (
 	"strings"
 )
 
-// CommandRole identifies the semantic role of an OB command,
-// independent of the binary label which rotates across PX tag versions.
+// CommandRole identifies the semantic role of an OB command, independent of the binary label which rotates across PX tag versions.
 type CommandRole = string
 
-// Known OB command roles. These are stable across PX versions even
-// though the command labels (binary strings) change with each tag rotation.
+// Known OB command roles. These are stable across PX versions even though the command labels (binary strings) change with each tag rotation.
 const (
 	RoleSID         CommandRole = "sid"          // Session ID (single UUID)
 	RoleVID         CommandRole = "vid"          // Visitor ID (UUID + TTL 31536000 + "false")
@@ -29,11 +27,7 @@ const (
 	RoleSolveResult CommandRole = "solve_result" // Challenge result ("0" = accepted, "-1" = rejected)
 )
 
-// AutoMapCommands identifies OB command roles by analyzing value patterns.
-//
-// PX rotates command-type labels with each tag version, but the value
-// formats remain stable. This function uses heuristic pattern matching
-// to identify what each command does, regardless of its label.
+// AutoMapCommands identifies OB command roles by analyzing value patterns. PX rotates command-type labels with each tag version, but the value formats remain stable. This function uses heuristic pattern matching to identify what each command does, regardless of its label.
 //
 // Returns a map of [CommandRole] -> command label string.
 //

@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -42,6 +43,10 @@ func main() {
 		handleDevirt(os.Args[2:])
 	case "fieldmap":
 		handleFieldMap(os.Args[2:])
+	case "fieldassign":
+		handleFieldAssign(os.Args[2:])
+	case "fieldarith":
+		handleFieldArithmetic(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -225,13 +230,13 @@ func handleVM(args []string) {
 
 	// Output trace as JSON
 	output := struct {
-		FLen       int                  `json:"f_len"`
-		CaseCount  int                  `json:"case_count"`
-		Switches   []switchSummary      `json:"switches"`
-		InitialN   []int                `json:"initial_n"`
-		InitOpcode int                  `json:"init_opcode"`
-		Steps      int                  `json:"steps"`
-		Trace      []unobpx.TraceEntry  `json:"trace"`
+		FLen       int                 `json:"f_len"`
+		CaseCount  int                 `json:"case_count"`
+		Switches   []switchSummary     `json:"switches"`
+		InitialN   []int               `json:"initial_n"`
+		InitOpcode int                 `json:"init_opcode"`
+		Steps      int                 `json:"steps"`
+		Trace      []unobpx.TraceEntry `json:"trace"`
 	}{
 		FLen:       len(prog.F),
 		CaseCount:  len(prog.Cases),
@@ -604,9 +609,9 @@ func handleFieldMap(args []string) {
 
 		// JSON diff output
 		type DiffOutput struct {
-			File1Keys  int `json:"file1_keys"`
-			File2Keys  int `json:"file2_keys"`
-			SharedKeys int `json:"shared_keys"`
+			File1Keys  int  `json:"file1_keys"`
+			File2Keys  int  `json:"file2_keys"`
+			SharedKeys int  `json:"shared_keys"`
 			SameBuild  bool `json:"same_build"`
 		}
 		diffOut := DiffOutput{
@@ -659,6 +664,176 @@ func handleFieldMap(args []string) {
 	fmt.Println(string(pretty))
 }
 
+func handleFieldAssign(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: unobpx fieldassign <init.js_file> [--baseline <solve.py>] [--out <json_file>|--save] [--no-stdout]")
+		os.Exit(1)
+	}
+
+	initPath := args[0]
+	baselineFile := ""
+	outFile := ""
+	noStdout := false
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--baseline":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "Missing path after --baseline")
+				os.Exit(1)
+			}
+			baselineFile = args[i+1]
+			i++
+		case "--out":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "Missing path after --out")
+				os.Exit(1)
+			}
+			outFile = args[i+1]
+			i++
+		case "--save":
+			outFile = defaultFieldAssignOutputPath(initPath)
+		case "--no-stdout":
+			noStdout = true
+		default:
+			fmt.Fprintf(os.Stderr, "Unknown fieldassign option: %s\n", args[i])
+			fmt.Fprintln(os.Stderr, "Usage: unobpx fieldassign <init.js_file> [--baseline <solve.py>] [--out <json_file>|--save] [--no-stdout]")
+			os.Exit(1)
+		}
+	}
+
+	source, err := os.ReadFile(initPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", initPath, err)
+		os.Exit(1)
+	}
+
+	assignments := unobpx.ExtractFieldAssignments(string(source))
+	fmt.Fprintf(os.Stderr, "Found %d sensor field assignments\n", len(assignments))
+
+	// Count by type
+	typeCounts := make(map[string]int)
+	fnCounts := make(map[string]int)
+	for _, a := range assignments {
+		typeCounts[a.AssignType]++
+		fnCounts[a.LookupFn]++
+	}
+	for t, c := range typeCounts {
+		fmt.Fprintf(os.Stderr, "  %s: %d\n", t, c)
+	}
+
+	// Collect unique keys
+	seen := make(map[string]bool)
+	unique := 0
+	for _, a := range assignments {
+		if !seen[a.Key] {
+			seen[a.Key] = true
+			unique++
+		}
+	}
+	fmt.Fprintf(os.Stderr, "Unique keys: %d\n", unique)
+
+	// If --baseline, compare against solve.py baseline
+	if baselineFile != "" {
+		bSource, bErr := os.ReadFile(baselineFile)
+		if bErr == nil {
+			baselineKeys := extractBaselineKeys(string(bSource))
+			src := string(source)
+			fmt.Fprintf(os.Stderr, "\nBaseline keys: %d\n", len(baselineKeys))
+			foundCount := 0
+			var missingInArrayOnly []string
+			var missingNotInSource []string
+			var missingOther []string
+			for _, bk := range baselineKeys {
+				if seen[bk] {
+					foundCount++
+				} else if !strings.Contains(src, bk) {
+					missingNotInSource = append(missingNotInSource, bk)
+				} else {
+					// Check if it only appears in array definitions (no direct assignment)
+					missingInArrayOnly = append(missingInArrayOnly, bk)
+				}
+			}
+			totalMissing := len(missingInArrayOnly) + len(missingNotInSource) + len(missingOther)
+			fmt.Fprintf(os.Stderr, "Matched in fieldassign: %d\n", foundCount)
+			fmt.Fprintf(os.Stderr, "Missing: %d\n", totalMissing)
+			fmt.Fprintf(os.Stderr, "  In arrays only (dynamic iteration): %d\n", len(missingInArrayOnly))
+			fmt.Fprintf(os.Stderr, "  Not in init.js (different build): %d\n", len(missingNotInSource))
+			if len(missingNotInSource) > 0 {
+				for _, k := range missingNotInSource {
+					fmt.Fprintf(os.Stderr, "    %s\n", k)
+				}
+			}
+		}
+	}
+
+	// Output JSON
+	pretty, _ := json.MarshalIndent(assignments, "", "  ")
+	if outFile != "" {
+		if err := os.MkdirAll(filepath.Dir(outFile), 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating output directory for %s: %v\n", outFile, err)
+			os.Exit(1)
+		}
+		if err := os.WriteFile(outFile, pretty, 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing %s: %v\n", outFile, err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Saved fieldassign JSON: %s\n", outFile)
+	}
+	if !noStdout {
+		fmt.Println(string(pretty))
+	}
+}
+
+func defaultFieldAssignOutputPath(initPath string) string {
+	dir := filepath.Dir(initPath)
+	base := filepath.Base(initPath)
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	return filepath.Join(dir, stem+".fieldassign.json")
+}
+
+func handleFieldArithmetic(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: unobpx fieldarith <init.js_file>")
+		os.Exit(1)
+	}
+
+	source, err := os.ReadFile(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", args[0], err)
+		os.Exit(1)
+	}
+
+	findings := unobpx.AnalyzeArithmeticDecoderCalls(string(source))
+	resolved := 0
+	for _, finding := range findings {
+		if finding.Confidence == "high" {
+			resolved++
+		}
+	}
+	fmt.Fprintf(os.Stderr, "Found %d arithmetic decoder calls\n", len(findings))
+	fmt.Fprintf(os.Stderr, "Resolved: %d\n", resolved)
+
+	pretty, _ := json.MarshalIndent(findings, "", "  ")
+	fmt.Println(string(pretty))
+}
+
+// extractBaselineKeys pulls base64 sensor keys from a solve.py _SEQ1_BASELINE_D dict.
+func extractBaselineKeys(source string) []string {
+	re := regexp.MustCompile(`'([A-Za-z0-9+/]{11}=)'`)
+	matches := re.FindAllStringSubmatch(source, -1)
+	seen := make(map[string]bool)
+	var keys []string
+	for _, m := range matches {
+		k := m[1]
+		if !seen[k] {
+			seen[k] = true
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
 func formatFields(fields []string) string {
 	if len(fields) == 0 {
 		return "(empty)"
@@ -687,7 +862,9 @@ Commands:
 	xorkey   Compute the OB XOR key from a PX tag string
 	vm       Trace PX VM execution from an init.js file
 	devirt   Devirtualize PX VM to equivalent JS source code
-	fieldmap Extract sensor field key arrays from init.js
+	fieldmap    Extract sensor field key arrays from init.js
+	fieldassign Extract sensor field key→value assignments from init.js
+	fieldarith  Analyze non-literal decoder calls inside field assignments
 
 Examples:
 # Decode OB response with known XOR key
@@ -710,6 +887,9 @@ unobpx vm docs/px/walmart_4-3-26_init.js
 
 # Extract field key arrays from init.js
 unobpx fieldmap docs/px/walmart_4-3-26_init.js
+
+# Analyze arithmetic decoder calls inside field assignments
+unobpx fieldarith docs/px/walmart_4-9-26_init.js
 
 # Diff field keys between two init.js versions
 unobpx fieldmap docs/px/walmart_4-3-26_init.js --diff docs/px/walmart_4-4-26_init.js`)
